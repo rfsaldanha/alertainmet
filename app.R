@@ -3,6 +3,7 @@ library(shiny)
 library(bslib)
 library(arrow)
 library(dplyr)
+library(tidyr)
 library(sf)
 library(lubridate)
 library(ggplot2)
@@ -97,12 +98,17 @@ ui <- page_navbar(
 
   # Table page
   nav_panel(
-    title = "Tabela",
+    title = "Tabelas",
 
-    card(
-      full_screen = TRUE,
-      card_body(
-        dataTableOutput(outputId = "table")
+    accordion(
+      multiple = FALSE,
+      accordion_panel(
+        title = "Quantidade de alertas",
+        dataTableOutput(outputId = "table_qtd")
+      ),
+      accordion_panel(
+        title = "Duração de alertas (dias)",
+        dataTableOutput(outputId = "table_duration")
       )
     )
   ),
@@ -163,26 +169,59 @@ server <- function(input, output, session) {
         yend = event,
         col = event
       )) +
-      geom_segment(size = 20) +
+      geom_segment(size = 25) +
       labs(
-        title = "Alertas meteorológicos INMET",
+        title = "Alertas meteorológicos emitidos pelo INMET",
         subtitle = name$name_muni[1],
         x = "Duração",
         y = NULL,
-        caption = "Elaboração: LIS/ICICT/Fiocruz"
+        caption = "Elaboração: Observatório de Clima e Saúde/LIS/ICICT/Fiocruz"
       ) +
       theme_bw() +
-      theme(legend.position = "none")
+      theme(legend.position = "none", text = element_text(size = 12))
   })
 
-  output$table <- renderDT({
-    ds |>
+  output$table_qtd <- renderDT({
+    res <- ds |>
       mutate(mun_codes = as.numeric(mun_codes)) |>
       left_join(mun, by = c("mun_codes" = "code_muni")) |>
       mutate(year = year(onset)) |>
       group_by(year, name_muni, event) |>
       summarise(freq = n()) |>
-      arrange(-freq)
+      ungroup() |>
+      pivot_wider(names_from = event, values_from = freq) |>
+      mutate(year = as.character(year)) |>
+      mutate(
+        `Total` = as.integer(rowSums(across(where(is.numeric)), na.rm = TRUE))
+      ) |>
+      arrange(-`Total`) |>
+      rename(`Ano` = year, `Município` = name_muni)
+
+    datatable(data = res, rownames = FALSE, options = list(dom = 'ftp'))
+  })
+
+  output$table_duration <- renderDT({
+    res <- ds |>
+      mutate(mun_codes = as.numeric(mun_codes)) |>
+      left_join(mun, by = c("mun_codes" = "code_muni")) |>
+      mutate(year = year(onset)) |>
+      group_by(year, name_muni, event) |>
+      summarise(
+        dur = round(
+          sum(as.numeric(expires - onset, "days"), na.rm = TRUE),
+          digits = 0
+        )
+      ) |>
+      ungroup() |>
+      pivot_wider(names_from = event, values_from = dur) |>
+      mutate(year = as.character(year)) |>
+      mutate(
+        `Total` = as.integer(rowSums(across(where(is.numeric)), na.rm = TRUE))
+      ) |>
+      arrange(-`Total`) |>
+      rename(`Ano` = year, `Município` = name_muni)
+
+    datatable(data = res, rownames = FALSE, options = list(dom = 'ftp'))
   })
 }
 
