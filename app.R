@@ -7,6 +7,7 @@ library(sf)
 library(lubridate)
 library(ggplot2)
 library(inmetrss)
+library(DT)
 
 # INMET parquet file address
 parquet_url <- "https://inmetalerts.nyc3.cdn.digitaloceanspaces.com/inmetalerts.parquet"
@@ -14,27 +15,23 @@ parquet_url <- "https://inmetalerts.nyc3.cdn.digitaloceanspaces.com/inmetalerts.
 # INMET dataset
 ds <- read_parquet(parquet_url)
 ds <- parse_mun(ds)
-ds$mun_codes <- substr(ds$mun_codes, 0, 6)
 
 # Read municipality seats data
-mun_seats <- readRDS("data/mun_seats.rds")
+mun <- readRDS("data/mun.rds")
 
 # Municipality list for selector
-mun_names <- mun_seats$code_muni
-names(mun_names) <- paste(mun_seats$name_muni, "-", mun_seats$abbrev_state)
-
-# Municipality codes and names
-ref_mun_names <- mun_seats |>
-  st_drop_geometry() |>
-  select(code_muni, name_muni, abbrev_state) |>
-  mutate(name_muni = paste(name_muni, "-", abbrev_state)) |>
-  select(-abbrev_state) |>
-  as_tibble()
+mun_names <- mun$code_muni
+names(mun_names) <- mun$name_muni
 
 # Interface
 ui <- page_navbar(
   title = "Alertas INMET",
   theme = bs_theme(bootswatch = "shiny"),
+
+  sidebar = sidebar(
+    uiOutput(outputId = "sel_year_UI"),
+    uiOutput(outputId = "sel_mun_UI")
+  ),
 
   # Logo
   tags$head(
@@ -90,19 +87,22 @@ ui <- page_navbar(
   nav_panel(
     title = "Alertas meteorológicos",
 
-    # Sidebar
-    layout_sidebar(
-      sidebar = sidebar(
-        uiOutput(outputId = "sel_year_UI"),
-        uiOutput(outputId = "sel_mun_UI")
-      ),
+    card(
+      full_screen = TRUE,
+      card_body(
+        plotOutput(outputId = "graph")
+      )
+    )
+  ),
 
-      # Card
-      card(
-        full_screen = TRUE,
-        card_body(
-          plotOutput(outputId = "graph")
-        )
+  # Table page
+  nav_panel(
+    title = "Tabela",
+
+    card(
+      full_screen = TRUE,
+      card_body(
+        dataTableOutput(outputId = "table")
       )
     )
   ),
@@ -148,7 +148,7 @@ server <- function(input, output, session) {
   output$graph <- renderPlot({
     req(input$sel_mun)
 
-    name <- ref_mun_names |>
+    name <- mun |>
       filter(code_muni == input$sel_mun) |>
       select(name_muni)
 
@@ -173,6 +173,16 @@ server <- function(input, output, session) {
       ) +
       theme_bw() +
       theme(legend.position = "none")
+  })
+
+  output$table <- renderDT({
+    ds |>
+      mutate(mun_codes = as.numeric(mun_codes)) |>
+      left_join(mun, by = c("mun_codes" = "code_muni")) |>
+      mutate(year = year(onset)) |>
+      group_by(year, name_muni, event) |>
+      summarise(freq = n()) |>
+      arrange(-freq)
   })
 }
 
